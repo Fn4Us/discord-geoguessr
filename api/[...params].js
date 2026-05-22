@@ -237,44 +237,44 @@ export default async function handler(req, res) {
   // Deterministic RNG seeded by the seed param
   const rng = makeRng(seed);
 
-  // Generate a deterministic point inside the state polygon
-  let candidateLat, candidateLng;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const lat = bounds.minLat + rng() * (bounds.maxLat - bounds.minLat);
-    const lng = bounds.minLng + rng() * (bounds.maxLng - bounds.minLng);
-    if (!pointInPolygon(lat, lng, stateFeature)) continue;
-    candidateLat = lat;
-    candidateLng = lng;
-    break;
-  }
+  // Use a small bbox chunk derived from the seed — subdivide the state into
+  // a 10x10 grid and pick a cell deterministically, then grab any image from it
+  const latStep = (bounds.maxLat - bounds.minLat) / 10;
+  const lngStep = (bounds.maxLng - bounds.minLng) / 10;
+  const cellX = Math.floor(rng() * 10);
+  const cellY = Math.floor(rng() * 10);
 
-  if (candidateLat == null) {
-    res.status(500).send('Could not generate a valid point inside state polygon.');
-    return;
-  }
+  const bboxMinLng = bounds.minLng + cellX * lngStep;
+  const bboxMaxLng = bboxMinLng + lngStep;
+  const bboxMinLat = bounds.minLat + cellY * latStep;
+  const bboxMaxLat = bboxMinLat + latStep;
 
-  // Search for nearest Mapillary image, expanding radius until we find one
+  // Try progressively larger bbox chunks until we get an image
   let nearest = null;
-  const radii = [500, 1000, 2000, 5000, 10000, 20000, 50000];
-  for (const radius of radii) {
+  for (let expand = 0; expand < 5 && !nearest; expand++) {
+    const e = expand * latStep;
     const url = new URL('https://graph.mapillary.com/images');
     url.searchParams.set('fields', 'id,sequence_id');
-    url.searchParams.set('closeto', `${candidateLng},${candidateLat}`);
-    url.searchParams.set('radius', String(radius));
+    url.searchParams.set('bbox', [
+      bboxMinLng - e,
+      bboxMinLat - e,
+      bboxMaxLng + e,
+      bboxMaxLat + e,
+    ].join(','));
     url.searchParams.set('limit', '1');
     url.searchParams.set('access_token', TOKEN);
 
-    const res2 = await fetch(url.toString());
-    if (!res2.ok) continue;
-    const data = await res2.json();
-    if (data.data?.length) {
-      nearest = { imageId: data.data[0].id, sequenceId: data.data[0].sequence_id };
-      break;
+    const r = await fetch(url.toString());
+    if (r.ok) {
+      const data = await r.json();
+      if (data.data?.length) {
+        nearest = { imageId: data.data[0].id, sequenceId: data.data[0].sequence_id };
+      }
     }
   }
 
   if (!nearest) {
-    res.status(404).send('No Mapillary coverage found anywhere in this state.');
+    res.status(404).send('No Mapillary coverage found in this state.');
     return;
   }
 
