@@ -203,15 +203,6 @@ export default async function handler(req, res) {
   // Parse /:state/:seed/:steps from the URL
   const parts = req.url.split('?')[0].split('/').filter(Boolean);
 
-  // TEMPORARY DEBUG — remove after testing
-  if (parts[0] === 'debug') {
-    const r = await fetch(
-      `https://graph.mapillary.com/images?fields=id&bbox=-97.5,30.0,-97.0,30.5&limit=1&access_token=${TOKEN}`
-    );
-    const text = await r.text();
-    res.status(200).send(`Status: ${r.status}\nToken set: ${!!TOKEN}\nResponse: ${text}`);
-    return;
-  }
 
   if (parts.length < 3) {
     res.status(400).send('Usage: /[state]/[seed]/[steps]  e.g. /texas/abc123/5');
@@ -255,7 +246,7 @@ export default async function handler(req, res) {
     const lng = bounds.minLng + rng() * (bounds.maxLng - bounds.minLng);
 
     // 0.05 x 0.05 = 0.0025 sq degrees — safely under the 0.01 sq deg cap
-    const delta = 0.03;
+    const delta = 0.05;
     const url = new URL('https://graph.mapillary.com/images');
     url.searchParams.set('fields', 'id,sequence_id');
     url.searchParams.set('bbox', `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`);
