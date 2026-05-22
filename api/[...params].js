@@ -255,7 +255,7 @@ export default async function handler(req, res) {
     const lng = bounds.minLng + rng() * (bounds.maxLng - bounds.minLng);
 
     // 0.05 x 0.05 = 0.0025 sq degrees — safely under the 0.01 sq deg cap
-    const delta = 0.05;
+    const delta = 0.03;
     const url = new URL('https://graph.mapillary.com/images');
     url.searchParams.set('fields', 'id,sequence_id');
     url.searchParams.set('bbox', `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`);
