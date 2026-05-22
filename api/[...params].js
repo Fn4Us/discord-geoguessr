@@ -1,4 +1,6 @@
 import * as topojson from 'topojson-client';
+import * as mvt from '@mapbox/vector-tile';
+import Protobuf from 'pbf';
 
 const TOKEN = process.env.MAPILLARY_TOKEN;
 
@@ -128,22 +130,47 @@ function makeRng(seed) {
 }
 
 
-async function findNearestImage(lat, lng) {
-  const url = new URL('https://graph.mapillary.com/images');
-  url.searchParams.set('fields', 'id,sequence_id');
-  url.searchParams.set('closeto', `${lng},${lat}`); // GeoJSON order: lng first
-  url.searchParams.set('radius', '500');
-  url.searchParams.set('limit', '1');
-  url.searchParams.set('access_token', TOKEN);
 
-  const res = await fetch(url.toString());
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!data.data?.length) return null;
-  return {
-    imageId: data.data[0].id,
-    sequenceId: data.data[0].sequence_id,
-  };
+function latLngToTile(lat, lng, zoom) {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor((lng + 180) / 360 * n);
+  const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
+  return { x, y, z: zoom };
+}
+
+async function findNearestImage(lat, lng) {
+  for (const zoom of [14, 12, 10]) {
+    const { x, y, z } = latLngToTile(lat, lng, zoom);
+    const url = `https://tiles.mapillary.com/maps/vtp/mly1_public/2/${z}/${x}/${y}?access_token=${TOKEN}`;
+
+    const res = await fetch(url);
+    if (!res.ok) continue;
+
+    const buffer = await res.arrayBuffer();
+    const tile = new mvt.VectorTile(new Protobuf(buffer));
+    const layer = tile.layers['image'];
+    if (!layer || layer.length === 0) continue;
+
+    let best = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < layer.length; i++) {
+      const feature = layer.feature(i);
+      const geom = feature.loadGeometry();
+      const props = feature.properties;
+      const fx = geom[0][0].x / 4096;
+      const fy = geom[0][0].y / 4096;
+      const dist = Math.hypot(fx - 0.5, fy - 0.5);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = props;
+      }
+    }
+
+    if (best?.id && best?.sequence_id) {
+      return { imageId: String(best.id), sequenceId: String(best.sequence_id) };
+    }
+  }
+  return null;
 }
 
 // Get all image IDs in a sequence, in capture order
