@@ -1,3 +1,14 @@
+// TEMPORARY DEBUG — remove after testing
+  if (parts[0] === 'debug') {
+    const r = await fetch(
+      `https://graph.mapillary.com/images?fields=id&bbox=-97.5,30.0,-97.0,30.5&limit=1&access_token=${TOKEN}`
+    );
+    const text = await r.text();
+    res.status(200).send(`Status: ${r.status}\nToken set: ${!!TOKEN}\nResponse: ${text}`);
+    return;
+  }
+
+
 import * as topojson from 'topojson-client';
 import * as mvt from '@mapbox/vector-tile';
 import Protobuf from 'pbf';
