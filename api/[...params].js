@@ -210,23 +210,44 @@ export default async function handler(req, res) {
   // Deterministic RNG seeded by the seed param
   const rng = makeRng(seed);
 
-  // Try up to 50 random points within the real state polygon
-  let nearest = null;
+  // Generate a deterministic point inside the state polygon
+  let candidateLat, candidateLng;
   for (let attempt = 0; attempt < 50; attempt++) {
     const lat = bounds.minLat + rng() * (bounds.maxLat - bounds.minLat);
     const lng = bounds.minLng + rng() * (bounds.maxLng - bounds.minLng);
-
-    // Reject points outside the real state border
     if (!pointInPolygon(lat, lng, stateFeature)) continue;
+    candidateLat = lat;
+    candidateLng = lng;
+    break;
+  }
 
-    nearest = await findNearestImage(lat, lng);
-    if (nearest) break;
+  if (candidateLat == null) {
+    res.status(500).send('Could not generate a valid point inside state polygon.');
+    return;
+  }
+
+  // Search for nearest Mapillary image, expanding radius until we find one
+  let nearest = null;
+  const radii = [500, 1000, 2000, 5000, 10000, 20000, 50000];
+  for (const radius of radii) {
+    const url = new URL('https://graph.mapillary.com/images');
+    url.searchParams.set('fields', 'id,sequence_id');
+    url.searchParams.set('closeto', `${candidateLng},${candidateLat}`);
+    url.searchParams.set('radius', String(radius));
+    url.searchParams.set('limit', '1');
+    url.searchParams.set('access_token', TOKEN);
+
+    const res2 = await fetch(url.toString());
+    if (!res2.ok) continue;
+    const data = await res2.json();
+    if (data.data?.length) {
+      nearest = { imageId: data.data[0].id, sequenceId: data.data[0].sequence_id };
+      break;
+    }
   }
 
   if (!nearest) {
-    res.status(404).send(
-      `No Mapillary coverage found for seed "${seed}" in ${parts[0]}. Try a different seed.`
-    );
+    res.status(404).send('No Mapillary coverage found anywhere in this state.');
     return;
   }
 
