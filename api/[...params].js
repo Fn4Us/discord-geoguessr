@@ -248,30 +248,17 @@ export default async function handler(req, res) {
   // Deterministic RNG seeded by the seed param
   const rng = makeRng(seed);
 
-  // Use a small bbox chunk derived from the seed — subdivide the state into
-  // a 10x10 grid and pick a cell deterministically, then grab any image from it
-  const latStep = (bounds.maxLat - bounds.minLat) / 10;
-  const lngStep = (bounds.maxLng - bounds.minLng) / 10;
-  const cellX = Math.floor(rng() * 10);
-  const cellY = Math.floor(rng() * 10);
-
-  const bboxMinLng = bounds.minLng + cellX * lngStep;
-  const bboxMaxLng = bboxMinLng + lngStep;
-  const bboxMinLat = bounds.minLat + cellY * latStep;
-  const bboxMaxLat = bboxMinLat + latStep;
-
-  // Try progressively larger bbox chunks until we get an image
+// Pick deterministic points from the seed, search a tiny bbox around each
   let nearest = null;
-  for (let expand = 0; expand < 5 && !nearest; expand++) {
-    const e = expand * latStep;
+  for (let attempt = 0; attempt < 20 && !nearest; attempt++) {
+    const lat = bounds.minLat + rng() * (bounds.maxLat - bounds.minLat);
+    const lng = bounds.minLng + rng() * (bounds.maxLng - bounds.minLng);
+
+    // 0.05 x 0.05 = 0.0025 sq degrees — safely under the 0.01 sq deg cap
+    const delta = 0.05;
     const url = new URL('https://graph.mapillary.com/images');
     url.searchParams.set('fields', 'id,sequence_id');
-    url.searchParams.set('bbox', [
-      bboxMinLng - e,
-      bboxMinLat - e,
-      bboxMaxLng + e,
-      bboxMaxLat + e,
-    ].join(','));
+    url.searchParams.set('bbox', `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`);
     url.searchParams.set('limit', '1');
     url.searchParams.set('access_token', TOKEN);
 
@@ -285,7 +272,7 @@ export default async function handler(req, res) {
   }
 
   if (!nearest) {
-    res.status(404).send('No Mapillary coverage found in this state.');
+    res.status(404).send('No Mapillary coverage found. Try a different seed.');
     return;
   }
 
