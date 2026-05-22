@@ -239,28 +239,31 @@ export default async function handler(req, res) {
   // Deterministic RNG seeded by the seed param
   const rng = makeRng(seed);
 
-// Pick deterministic points from the seed, search a tiny bbox around each
-  let nearest = null;
-  for (let attempt = 0; attempt < 20 && !nearest; attempt++) {
+// Pre-generate all 20 candidate points from the RNG first
+  const candidates = [];
+  for (let i = 0; i < 20; i++) {
     const lat = bounds.minLat + rng() * (bounds.maxLat - bounds.minLat);
     const lng = bounds.minLng + rng() * (bounds.maxLng - bounds.minLng);
-
-    // 0.05 x 0.05 = 0.0025 sq degrees — safely under the 0.01 sq deg cap
-    const delta = 0.05;
-    const url = new URL('https://graph.mapillary.com/images');
-    url.searchParams.set('fields', 'id,sequence_id');
-    url.searchParams.set('bbox', `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`);
-    url.searchParams.set('limit', '1');
-    url.searchParams.set('access_token', TOKEN);
-
-    const r = await fetch(url.toString());
-    if (r.ok) {
-      const data = await r.json();
-      if (data.data?.length) {
-        nearest = { imageId: data.data[0].id, sequenceId: data.data[0].sequence_id };
-      }
-    }
+    candidates.push({ lat, lng });
   }
+
+  // Fire all 20 requests in parallel, take the first one that returns an image
+  const delta = 0.049;
+  let nearest = await Promise.any(
+    candidates.map(async ({ lat, lng }) => {
+      const url = new URL('https://graph.mapillary.com/images');
+      url.searchParams.set('fields', 'id,sequence_id');
+      url.searchParams.set('bbox', `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`);
+      url.searchParams.set('limit', '1');
+      url.searchParams.set('access_token', TOKEN);
+
+      const r = await fetch(url.toString());
+      if (!r.ok) throw new Error('no result');
+      const data = await r.json();
+      if (!data.data?.length) throw new Error('no result');
+      return { imageId: data.data[0].id, sequenceId: data.data[0].sequence_id };
+    })
+  ).catch(() => null);
 
   if (!nearest) {
     res.status(404).send('No Mapillary coverage found. Try a different seed.');
